@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.DS_Store
+
+# Secrets
+.env
+
+# Experiment output written by eig_game_play.py, relative to bedllm_20q/
+bedllm_20q/dicts/
+bedllm_20q/figures/
+
+# Weights & Biases run directories
+wandb/

@@ -1,0 +1,14 @@
+# Direct third-party imports of bedllm_20q/*.py, at the versions the reported
+# results were produced with. This is the full set: an AST walk of the import
+# closure of eig_game_play.py reaches nothing else.
+absl-py==2.2.1
+matplotlib==3.10.1
+numpy==1.26.4
+openai==1.66.3
+python-dotenv==1.0.1
+requests==2.32.3
+tiktoken==0.9.0
+transformers==4.50.3
+wandb==0.19.8
+
+# Serving local models on GPUs needs vLLM as well: see requirements-local.txt.

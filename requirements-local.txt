@@ -1,0 +1,8 @@
+# Extra packages for the local-model path only.
+#
+# serve_model.ModelServer launches `vllm serve` as a subprocess when the model
+# name is not an OpenAI model, so vLLM has to be importable by the shell, not by
+# this code. Install this file only if you run local models on GPUs.
+-r requirements.txt
+torch==2.6.0
+vllm==0.8.2
