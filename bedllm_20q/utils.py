@@ -188,8 +188,11 @@ def question_eig(
     idx = np.argmax(info_gains)
     print(f"Maximum EIG at Question {idx + 1}")
     print(f"Average entropies at step {step}: {average_entropies}")
-    w_hist = wandb.Histogram(average_entropies)
-    wandb.log({"custom_step": step, f"average_entropy_hist/{item}": w_hist})
+    # ``wandb.log`` raises before ``wandb.init``, so skip the histogram when
+    # no run is active (``--debug`` never starts one).
+    if wandb.run is not None:
+        w_hist = wandb.Histogram(average_entropies)
+        wandb.log({"custom_step": step, f"average_entropy_hist/{item}": w_hist})
     return followup_questions[idx], info_gains[idx]
 
 

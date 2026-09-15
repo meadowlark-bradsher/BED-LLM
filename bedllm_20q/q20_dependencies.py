@@ -29,6 +29,10 @@ class WandbRunLogger:
         return self._wandb.Table(columns=list(columns))
 
     def log_event(self, payload: Dict[str, Any], step: Optional[int] = None) -> None:
+        # ``wandb.log`` raises before ``wandb.init``, and ``--debug`` never
+        # initialises a run, so drop the event when no run is active.
+        if self._wandb.run is None:
+            return
         if step is None:
             self._wandb.log(payload)
         else:
