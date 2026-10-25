@@ -1,0 +1,47 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        deps:
+          # Only what the tests import; the model-serving libraries are
+          # stubbed by tests/conftest.py. Fast, and the path a contributor
+          # without GPUs or an API key will run.
+          - light
+          # The pinned runtime requirements, so the suite also runs against
+          # the real wandb, openai, tiktoken and transformers modules.
+          - full
+    name: pytest (${{ matrix.deps }})
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-test.txt
+
+      - name: Install (light)
+        if: matrix.deps == 'light'
+        run: pip install absl-py==2.2.1 numpy==1.26.4 matplotlib==3.10.1 pytest==8.3.5
+
+      - name: Install (full)
+        if: matrix.deps == 'full'
+        run: pip install -r requirements-test.txt
+
+      - name: Lint
+        run: |
+          pip install ruff
+          ruff check bedllm_20q tests
+
+      - name: Test
+        run: pytest -q
