@@ -74,6 +74,27 @@ def test_q20_question_cleaning_and_bingo_detection():
     assert not Q20._is_bingo_response({"content": "No."})
 
 
+@pytest.mark.parametrize(
+    "answer,expected",
+    [
+        ("Yes.", "yes"),
+        ("yes, it is", "yes"),
+        ("No.", "no"),
+        # Uncertain replies keep the current pool. "Don't know." is the
+        # --enable_maybe answer and contains "no"; the old substring check
+        # sent it down the No branch.
+        ("Don't know.", "keep"),
+        ("Unknown", "keep"),
+        ("Maybe.", "keep"),
+        ("Bingo!", "keep"),
+    ],
+)
+def test_q20_theta_branch_follows_the_leading_token(answer, expected):
+    pools = {"keep": ["a", "b"], "yes": ["a"], "no": ["b"]}
+    chosen = Q20._concepts_after_answer(answer, pools["keep"], pools["yes"], pools["no"])
+    assert chosen is pools[expected]
+
+
 def test_q20_requires_a_generated_question_in_auto_mode(fake_model):
     game = Q20(guesser_model=fake_model("gpt-4.1"), answerer_model=fake_model("gpt-4.1"), item="Lion")
     with pytest.raises(ValueError, match="Missing generated question at turn 3"):

@@ -36,6 +36,23 @@ YES_NO_TOKENS: tuple[str, ...] = YES_SPELLINGS + NO_SPELLINGS
 MIN_YES_NO_MASS = 0.05
 
 
+def yes_no_polarity(text: str) -> Optional[bool]:
+    """Return True for a yes-answer, False for a no-answer, None otherwise.
+
+    Reads only the leading token, so a verbose reply ("Yes, it is a mammal.")
+    is still classified by polarity, while a reply that merely contains the
+    word somewhere ("Don't know.", "Unknown", "Not sure") is not. The
+    consistency filter and the theta-EIG branch choice both read answers
+    through this one function.
+    """
+    stripped = text.strip().lower()
+    if stripped.startswith("yes"):
+        return True
+    if stripped.startswith("no"):
+        return False
+    return None
+
+
 def top_logprob_dict(top_logprobs) -> Dict[str, float]:
     """Flatten one chat-completions ``top_logprobs`` entry into {token: logprob}."""
     return {

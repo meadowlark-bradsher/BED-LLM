@@ -5,12 +5,13 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from concept_sampler import _clean_concept_line, _qa_pairs, _yes_no_polarity
+from concept_sampler import _clean_concept_line, _qa_pairs
 from q20_llm_io import (
     extract_yes_no_probs,
     has_yes_no_mass,
     top_logprob_dict,
     yes_no_mass,
+    yes_no_polarity,
 )
 from q20_turn_setup import _react_question
 from question_sampler import _clean_question_line, _split_item_aliases
@@ -161,10 +162,14 @@ def test_qa_pairs_skips_the_head_and_an_unanswered_question():
     assert _qa_pairs(messages) == [("Q1", "Yes.")]
 
 
-def test_yes_no_polarity_reads_the_leading_token():
-    assert _yes_no_polarity("Yes, it is.") is True
-    assert _yes_no_polarity(" no.") is False
-    assert _yes_no_polarity("It depends.") is None
+def test_yes_no_polarity_reads_the_leading_token_only():
+    assert yes_no_polarity("Yes, it is.") is True
+    assert yes_no_polarity(" no.") is False
+    assert yes_no_polarity("It depends.") is None
+    # Containing the letters is not answering.
+    assert yes_no_polarity("Don't know.") is None
+    assert yes_no_polarity("Unknown") is None
+    assert yes_no_polarity("I am not sure, yes or no") is None
 
 
 def test_extract_action_content():

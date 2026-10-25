@@ -13,6 +13,7 @@ from q20_llm_io import (
     extract_yes_no_probs,
     has_yes_no_mass,
     top_logprob_dict,
+    yes_no_polarity,
 )
 from retry_utils import retry_with_backoff
 from serve_model import is_reasoning_model, resolve_model
@@ -79,20 +80,6 @@ def _filter_max_workers(concepts: list[str]) -> int:
 
 # Stateless; shared so the consistency filter and the answerer cannot drift.
 _PROMPT_BUILDER = Q20PromptBuilder()
-
-
-def _yes_no_polarity(text: str) -> Optional[bool]:
-    """Return True for a yes-answer, False for a no-answer, None otherwise.
-
-    Compares only the leading yes/no token, so a verbose reply ("Yes, it is a
-    mammal.") is still classified by polarity.
-    """
-    stripped = text.strip().lower()
-    if stripped.startswith("yes"):
-        return True
-    if stripped.startswith("no"):
-        return False
-    return None
 
 
 def _qa_pairs(messages: list[dict]) -> list[tuple[str, str]]:
@@ -583,7 +570,7 @@ class ConceptSampler:
             )
             logprobs = response.choices[0].logprobs.top_logprobs[0]
         else:
-            expected = _yes_no_polarity(answer)
+            expected = yes_no_polarity(answer)
             if expected is None:
                 return True
             # The threshold rule needs the same prompt and the same model as the
@@ -600,9 +587,9 @@ class ConceptSampler:
             # Reasoning models can emit chain-of-thought into ``content``; keep
             # only the post-</think> text, as ``_parse_concepts`` does.
             output = output.split("</think>")[-1]
-            return _yes_no_polarity(output) == expected
+            return yes_no_polarity(output) == expected
         if self._logprob_filter_enabled() and has_yes_no_mass(logprobs):
-            expected = _yes_no_polarity(answer)
+            expected = yes_no_polarity(answer)
             if expected is None:
                 return True
             return self._survives_logprob_filter(logprobs, expected, concept, question)

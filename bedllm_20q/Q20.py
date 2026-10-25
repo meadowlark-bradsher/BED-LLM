@@ -30,7 +30,7 @@ from q20_turn_setup import (
     EigTurnSetup,
     ThetaTurnSetup,
 )
-from q20_llm_io import Q20LlmInterface, DefaultQ20LlmInterface
+from q20_llm_io import Q20LlmInterface, DefaultQ20LlmInterface, yes_no_polarity
 from prompts import task_completion_prompt
 from serve_model import is_hosted_openai_model, is_reasoning_model
 import wandb
@@ -263,6 +263,24 @@ class Q20:
     @staticmethod
     def _is_bingo_response(usr_msg):
         return "bingo" in usr_msg["content"].lower()
+
+    @staticmethod
+    def _concepts_after_answer(answer, concepts, yes_concepts, no_concepts):
+        """Return the hypothesis pool to carry forward after ``answer``.
+
+        The theta-EIG chooser samples one pool per answer branch; the
+        answer picks the branch. Only the leading yes/no token counts, so an
+        uncertain reply such as "Don't know." (the ``--enable_maybe`` option)
+        or "Unknown" keeps the current pool instead of being read as a No
+        because it contains the letters "no".
+        """
+        polarity = yes_no_polarity(answer)
+        if polarity is True:
+            return yes_concepts
+        if polarity is False:
+            return no_concepts
+        print("Uncertain answer, keeping all concepts.")
+        return concepts
 
     def _set_guess_deadline_instruction(self, turn_index, num_turns):
         if turn_index == num_turns - 2:
@@ -676,12 +694,9 @@ class Q20:
                 num_turns=num_turns,
                 sample=sample,
             )
-            if "yes" in usr_msg["content"].lower():
-                concepts = yes_concepts
-            elif "no" in usr_msg["content"].lower():
-                concepts = no_concepts
-            else:
-                print("Uncertain answer, keeping all concepts.")
+            concepts = self._concepts_after_answer(
+                usr_msg["content"], concepts, yes_concepts, no_concepts
+            )
 
             q_table.add_data(
                 guesser_msg["content"],
