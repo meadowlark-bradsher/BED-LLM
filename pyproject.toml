@@ -3,3 +3,8 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["bedllm_20q"]
+
+# Pin the lint rule set so a newer ruff on CI cannot add rules (0.17 turned on
+# import sorting by default) that the pinned local version does not apply.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
