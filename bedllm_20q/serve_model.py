@@ -17,6 +17,29 @@ def is_reasoning_model(name: str) -> bool:
     return any(name.startswith(p) for p in REASONING_MODEL_PREFIXES)
 
 
+def is_hosted_openai_model(name: str) -> bool:
+    """True when ``name`` is served by the OpenAI API, not a local vLLM process.
+
+    The one place this distinction is made. Every routing site (which client
+    to build, chat versus completions logprobs, which tokenizer) reads it, so
+    a new hosted family is added to ``REASONING_MODEL_PREFIXES`` or here and
+    nowhere else.
+    """
+    return name.startswith("gpt") or is_reasoning_model(name)
+
+
+def supports_token_logprobs(name: str) -> bool:
+    """True when the model can return per-token log-probabilities.
+
+    A locally served model always can. A hosted ``gpt-4``-class chat model
+    can. The OpenAI reasoning families cannot: they reject ``logprobs`` and
+    ``temperature`` outright, so every acquisition that integrates p(yes | q,
+    hypothesis) or scores hypotheses by their log-probability has nothing to
+    read from them.
+    """
+    return not is_reasoning_model(name)
+
+
 def resolve_model(model, model_name, *, default, port=8000, num_gpus=1):
     """Return ``(model_server, model_name)`` from a model instance, a name, or a default.
 
@@ -36,7 +59,7 @@ def resolve_model(model, model_name, *, default, port=8000, num_gpus=1):
 class ModelServer:
     def __init__(self, model_name, port=8000, dtype="bfloat16", num_gpus=1):
         self.model_name = model_name
-        if self.model_name.startswith("gpt") or is_reasoning_model(self.model_name):
+        if is_hosted_openai_model(self.model_name):
             self.client = OpenAI(
                 api_key=os.getenv("OPENAI_API_KEY"),
             )

@@ -1,6 +1,6 @@
 from absl import app
 from absl import flags
-from serve_model import ModelServer
+from serve_model import ModelServer, supports_token_logprobs
 from question_sampler import QuestionSampler, QuestionSamplerConfig
 from concept_sampler import ConceptSampler, ConceptSamplerConfig
 from Q20 import Q20
@@ -452,6 +452,57 @@ _DISPATCH: dict[str, _Dispatch] = {
     "Implicit_Max":                   _Dispatch("game_play_with_eig",  _eig_full_kwargs),
 }
 
+# Acquisitions whose question choice reads token log-probabilities from the
+# guesser: the EIG family integrates p(yes | question, hypothesis) and the
+# logprob-split and theta-EIG families score hypotheses by log-probability.
+# ``Entropy`` joins the set only under ``--use_logits_entropy`` (the default);
+# with it off, ``question_proportion_entropy`` counts text replies instead.
+_GUESSER_LOGPROB_ACQUISITIONS: frozenset[str] = frozenset(
+    {
+        "EIG",
+        "No_filter",
+        "Split_logprobs_original",
+        "Split_logprobs",
+        "Split_logprobs_renormalized",
+        "Data_estimation_rank_aligned",
+        "Data_estimation_union_mixture",
+    }
+)
+
+# Acquisitions that also read p(yes | history) from the answerer, to weight the
+# Yes and No branch posteriors.
+_ANSWERER_LOGPROB_ACQUISITIONS: frozenset[str] = frozenset(
+    {"Data_estimation_rank_aligned", "Data_estimation_union_mixture"}
+)
+
+
+def _reject_unsupported_logprob_runs(cfg: RunConfig) -> None:
+    """Raise before any game starts when a model cannot serve its acquisition.
+
+    An OpenAI reasoning model rejects ``logprobs`` and ``temperature`` on every
+    request. Without this check the first turn of every game retries that
+    rejection through the full backoff policy, the batch loop retries the
+    whole batch three times, and the run ends with no results an hour later.
+    """
+    guesser_needs = set(_GUESSER_LOGPROB_ACQUISITIONS)
+    if cfg.use_logits_entropy:
+        guesser_needs.add("Entropy")
+    for role, name, needs in (
+        ("guesser", cfg.model_name, guesser_needs),
+        ("answerer", cfg.answerer_model_name, _ANSWERER_LOGPROB_ACQUISITIONS),
+    ):
+        blocked = [acq for acq in cfg.acquisitions if acq in needs]
+        if blocked and not supports_token_logprobs(name):
+            raise app.UsageError(
+                f"{name!r} is an OpenAI reasoning model and returns no token "
+                f"log-probabilities, but the {role} needs them for "
+                f"{', '.join(blocked)}. Use a gpt-4-class model or a locally "
+                f"served one as the {role}, or choose an acquisition that "
+                "reads text replies only (Prompt_Only, React, Implicit_Max, "
+                "Implicit_Max_no_beliefs, Sample_EIG, Split_uniform*)."
+            )
+
+
 # Keep the dispatch table and the validated-list of acquisitions in lockstep.
 # If you add a strategy, add it to both places (or you will see a clear error
 # at module load instead of a runtime KeyError later).
@@ -756,6 +807,7 @@ def _make_plots(
 
 def main(_argv):
     cfg = RunConfig.from_flags(FLAGS)
+    _reject_unsupported_logprob_runs(cfg)
     paths = ArtifactPaths(cfg, run_timestamp=datetime.now().strftime("%Y%m%d_%H%M%S"))
     paths.ensure_dirs()
 

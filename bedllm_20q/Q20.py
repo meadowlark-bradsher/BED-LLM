@@ -32,7 +32,7 @@ from q20_turn_setup import (
 )
 from q20_llm_io import Q20LlmInterface, DefaultQ20LlmInterface
 from prompts import task_completion_prompt
-from serve_model import is_reasoning_model
+from serve_model import is_hosted_openai_model, is_reasoning_model
 import wandb
 from retry_utils import retry_with_backoff
 
@@ -369,7 +369,7 @@ class Q20:
 
     @staticmethod
     def _is_api_model(model_name):
-        return model_name.startswith("gpt") or is_reasoning_model(model_name)
+        return is_hosted_openai_model(model_name)
 
 
     def dialog_history(self):

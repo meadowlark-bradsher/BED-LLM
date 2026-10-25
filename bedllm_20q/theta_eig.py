@@ -2,6 +2,7 @@ import tiktoken
 import numpy as np
 from prompts import task_completion_prompt
 from retry_utils import retry_with_backoff
+from serve_model import is_hosted_openai_model, supports_token_logprobs
 
 
 
@@ -73,13 +74,16 @@ To increase randomness:
 Output rules:
 - Provide the **full** name without any additional information, including the tokens given. The first tokens have been generated for you: """
 
-    # This chat-logprob path relies on tiktoken's decode_single_token_bytes and is
-    # gpt-only; non-gpt models are routed through
-    # theta_eig_completions.item_probs_from_completion_logprobs by the caller.
-    assert model.model_name.startswith("gpt-"), (
-        "item_probs_from_chat_logprobs only supports gpt- models; "
-        "use item_probs_from_completion_logprobs for local models."
-    )
+    # This chat-logprob path relies on tiktoken's decode_single_token_bytes, so
+    # it serves hosted OpenAI chat models only. Local models are routed through
+    # theta_eig_completions.item_probs_from_completion_logprobs by the caller,
+    # and the reasoning families return no logprobs for either path.
+    name = model.model_name
+    if not is_hosted_openai_model(name) or not supports_token_logprobs(name):
+        raise ValueError(
+            f"item_probs_from_chat_logprobs needs a hosted OpenAI chat model that "
+            f"returns token log-probabilities, not {name!r}"
+        )
     enc = tiktoken.encoding_for_model(model.model_name)
     print("Messages in probability function:", messages)
     response = chat_with_logprobs(init_prompt, model=model, messages=messages)

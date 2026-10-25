@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 
 from retry_utils import retry_with_backoff
-from serve_model import is_reasoning_model, resolve_model
+from serve_model import is_hosted_openai_model, is_reasoning_model, resolve_model
 from utils import (
     format_conversation,
     get_animal_question_prompt,
@@ -106,12 +106,9 @@ class QuestionSampler:
         Hosted OpenAI models are excluded because ``/v1/completions`` with
         ``echo`` + ``logprobs`` is unavailable there and, for the reasoning
         families, ``AutoTokenizer.from_pretrained(model_name)`` has no HF repo
-        to load. Mirrors ``Q20._is_api_model`` rather than testing
-        ``startswith("gpt")``, which would admit o1/o3/o4.
+        to load.
         """
-        return not (
-            self.model_name.startswith("gpt") or is_reasoning_model(self.model_name)
-        )
+        return not is_hosted_openai_model(self.model_name)
 
     def _correct_guess_logprob(self, prompt, possible_responses):
         """Log and return the per-alias logprob of the true item."""

@@ -5,6 +5,7 @@ import wandb
 import re
 
 from prompts import task_completion_prompt
+from serve_model import is_hosted_openai_model, is_reasoning_model
 from theta_eig import item_probs_from_chat_logprobs
 from theta_eig_completions import (
     item_probs_from_completion_logprobs,
@@ -32,10 +33,12 @@ def format_conversation(messages) -> str:
 def _concept_probs_given_history(agent, messages, candidate_concepts):
     """Return the guesser's normalized probability over ``candidate_concepts``.
 
-    Chat-token-logprob models (``gpt-*``) are teacher-forced through
-    :func:`theta_eig.item_probs_from_chat_logprobs`; every other model
-    is scored on a flat completion prompt via
-    :func:`theta_eig_completions.item_probs_from_completion_logprobs`.
+    Hosted OpenAI chat models are teacher-forced through
+    :func:`theta_eig.item_probs_from_chat_logprobs`; locally served models
+    are scored on a flat completion prompt via
+    :func:`theta_eig_completions.item_probs_from_completion_logprobs`. The
+    OpenAI reasoning families return no token log-probabilities at all, so
+    they are rejected here rather than ten retries deep inside either path.
 
     ``question_split_score``, ``question_theta_eig_union_mixture`` and
     ``question_theta_eig_rank_aligned`` all use this quantity. The prompt wording
@@ -45,7 +48,13 @@ def _concept_probs_given_history(agent, messages, candidate_concepts):
         return np.array([])
     task = getattr(agent, "task", "celebrities")
     model_name = str(getattr(agent.guesser_model, "model_name", ""))
-    if model_name.startswith("gpt"):
+    if is_reasoning_model(model_name):
+        raise ValueError(
+            f"{model_name!r} is an OpenAI reasoning model and returns no token "
+            "log-probabilities; the logprob-based acquisitions need a gpt-4-class "
+            "model or a locally served one as the guesser"
+        )
+    if is_hosted_openai_model(model_name):
         probs = item_probs_from_chat_logprobs(
             agent.guesser_model,
             candidate_concepts,

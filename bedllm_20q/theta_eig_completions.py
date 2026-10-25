@@ -1,7 +1,7 @@
 from transformers import AutoTokenizer
 import numpy as np
 from functools import lru_cache
-from serve_model import ModelServer
+from serve_model import ModelServer, is_hosted_openai_model
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -13,7 +13,7 @@ def _tokenizer_for(model_name: str):
     mutated here, while `item_probs_from_completion_logprobs` is called
     once per candidate question per answer branch on each turn.
     """
-    if model_name.startswith("gpt"):
+    if is_hosted_openai_model(model_name):
         # Hosted OpenAI models never reach this path: every caller routes them
         # through ``theta_eig.item_probs_from_chat_logprobs`` instead, and the
         # ``echo`` + ``logprobs`` completions call below is unavailable there.
