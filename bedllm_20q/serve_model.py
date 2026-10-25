@@ -140,15 +140,46 @@ class ModelServer:
                     "before becoming ready"
                 )
             if time.monotonic() > deadline:
+                self._stop_process(process)
                 raise TimeoutError("vLLM server did not become ready in time")
             try:
                 response = requests.get(f"{self.base_url}/models", timeout=5)
-                print(response.json())
-                break
             except requests.exceptions.RequestException:
                 time.sleep(1)
+                continue
+            # A reply proves only that something is bound to the port, not that
+            # it is this process. A second local model started on the same
+            # port, or a server left over from an earlier run, answers here
+            # while the process above dies on bind, and every later request
+            # would silently go to the wrong model. So check the served id.
+            served = self._served_model_ids(response)
+            if self.model_name not in served:
+                self._stop_process(process)
+                raise RuntimeError(
+                    f"port {self.port} is already serving {served}, not "
+                    f"{self.model_name!r}; give this model its own port"
+                )
+            print(response.json())
+            break
 
         return process
+
+    @staticmethod
+    def _served_model_ids(response) -> list:
+        """Return the model ids a ``/v1/models`` reply lists, or [] if unreadable."""
+        try:
+            return [entry.get("id") for entry in response.json().get("data", [])]
+        except (ValueError, AttributeError):
+            return []
+
+    @staticmethod
+    def _stop_process(process) -> None:
+        process.terminate()
+        try:
+            process.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
 
     def wait_termination(func):
         def wrapper(self, *args, **kwargs):

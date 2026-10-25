@@ -35,6 +35,15 @@ The experiments are also configured to run local models on GPUs using `vllm`. To
 python eig_game_play.py --model_name "Qwen/Qwen2.5-72B-Instruct" --answerer_model_name "gpt-4.1" --dataset "animals" --num_gpus 2 --port 8000
 ```
 
+When the answerer is a *different* local model from the guesser, each gets its
+own vLLM server. The answerer's server listens on `--answerer_port`, which
+defaults to `--port + 1`. The launcher refuses to start if both are set to the
+same port, and each server checks at startup that the model answering on its
+port is the one it launched, so a leftover server from an earlier run is
+reported rather than silently reused. Note that both servers are started with
+the same `--num_gpus` and no GPU partitioning, and each claims 95% of the
+memory on the GPUs it sees, so two local models need enough GPUs for both.
+
 ## Filtering hypotheses on the answer probability
 
 Each turn, the code removes the sampled hypotheses that disagree with the

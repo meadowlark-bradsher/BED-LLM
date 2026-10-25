@@ -1,6 +1,6 @@
 from absl import app
 from absl import flags
-from serve_model import ModelServer, supports_token_logprobs
+from serve_model import ModelServer, is_hosted_openai_model, supports_token_logprobs
 from question_sampler import QuestionSampler, QuestionSamplerConfig
 from concept_sampler import ConceptSampler, ConceptSamplerConfig
 from Q20 import Q20
@@ -47,6 +47,13 @@ flags.DEFINE_string(
 )
 flags.DEFINE_string("answerer_model_name", None, "name of the answerer model")
 flags.DEFINE_integer("port", 8000, "port")
+flags.DEFINE_integer(
+    "answerer_port",
+    None,
+    "port for the answerer's vLLM server when --answerer_model_name is a "
+    "different local model from --model_name; defaults to --port + 1. Unused "
+    "when the answerer is the guesser or a hosted OpenAI model",
+)
 flags.DEFINE_integer(
     "num_gpus", 1, "the number of GPUs over which the parallelize the LLM"
 )
@@ -213,6 +220,7 @@ class RunConfig:
     model_name: str
     answerer_model_name: str
     port: int
+    answerer_port: int
     num_gpus: int
     num_turns: int
     dataset: str
@@ -232,6 +240,9 @@ class RunConfig:
     @classmethod
     def from_flags(cls, FLAGS) -> "RunConfig":
         answerer = FLAGS.answerer_model_name or FLAGS.model_name
+        answerer_port = (
+            FLAGS.answerer_port if FLAGS.answerer_port is not None else FLAGS.port + 1
+        )
         acquisitions = tuple(FLAGS.multi_acquisitions or [FLAGS.acquisition])
         concept_config = ConceptSamplerConfig(
             num_samples=FLAGS.num_concept_samples,
@@ -260,6 +271,7 @@ class RunConfig:
             model_name=FLAGS.model_name,
             answerer_model_name=answerer,
             port=FLAGS.port,
+            answerer_port=answerer_port,
             num_gpus=FLAGS.num_gpus,
             num_turns=FLAGS.num_turns,
             dataset=FLAGS.dataset,
@@ -503,6 +515,27 @@ def _reject_unsupported_logprob_runs(cfg: RunConfig) -> None:
             )
 
 
+def _reject_port_collision(cfg: RunConfig) -> None:
+    """Raise when two different local models would bind one port.
+
+    Each local model is its own ``vllm serve`` process, and two processes
+    cannot share a port. ``--answerer_port`` defaults to ``--port + 1``, so
+    this only fires when both were set to the same value by hand.
+    """
+    if cfg.answerer_model_name == cfg.model_name:
+        return
+    both_local = not is_hosted_openai_model(
+        cfg.model_name
+    ) and not is_hosted_openai_model(cfg.answerer_model_name)
+    if both_local and cfg.answerer_port == cfg.port:
+        raise app.UsageError(
+            f"--port and --answerer_port are both {cfg.port}, but the guesser "
+            f"{cfg.model_name!r} and the answerer {cfg.answerer_model_name!r} are "
+            "different local models and each needs its own vLLM server. Pass a "
+            "different --answerer_port."
+        )
+
+
 # Keep the dispatch table and the validated-list of acquisitions in lockstep.
 # If you add a strategy, add it to both places (or you will see a clear error
 # at module load instead of a runtime KeyError later).
@@ -618,7 +651,9 @@ def _setup_models(cfg: RunConfig) -> tuple[ModelServer, ModelServer]:
     )
     if cfg.answerer_model_name != cfg.model_name:
         answerer = ModelServer(
-            model_name=cfg.answerer_model_name, port=cfg.port, num_gpus=cfg.num_gpus
+            model_name=cfg.answerer_model_name,
+            port=cfg.answerer_port,
+            num_gpus=cfg.num_gpus,
         )
     else:
         answerer = shared
@@ -808,6 +843,7 @@ def _make_plots(
 def main(_argv):
     cfg = RunConfig.from_flags(FLAGS)
     _reject_unsupported_logprob_runs(cfg)
+    _reject_port_collision(cfg)
     paths = ArtifactPaths(cfg, run_timestamp=datetime.now().strftime("%Y%m%d_%H%M%S"))
     paths.ensure_dirs()
 
