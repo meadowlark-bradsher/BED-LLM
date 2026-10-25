@@ -1,0 +1,6 @@
+# Test runner on top of the pinned runtime requirements. The tests stub any of
+# the model-serving libraries that are not installed (see tests/conftest.py),
+# so a lighter environment with just absl-py, numpy, matplotlib and pytest
+# also runs them.
+-r requirements.txt
+pytest==8.3.5

@@ -1,0 +1,5 @@
+# Test configuration only. The package is not installed; bedllm_20q/ uses flat
+# imports and is run from inside that directory, so pytest puts it on sys.path.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["bedllm_20q"]

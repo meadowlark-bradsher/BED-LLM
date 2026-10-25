@@ -98,6 +98,18 @@ Four limits to know:
 The option is off by default, so a run without it reproduces the recorded
 results.
 
+## Tests
+```
+pip install -r requirements-test.txt
+pytest
+```
+Run from the repository root. The tests cover the acquisition math, the
+reply parsing, flag resolution and dispatch, the model-routing predicates,
+and the vLLM readiness check, all without a model or network. Any of the
+model-serving libraries that is not installed is replaced with a stand-in
+by `tests/conftest.py`, so a lighter environment with only `absl-py`,
+`numpy`, `matplotlib` and `pytest` runs them too.
+
 ## Reproducibility
 Set `PYTHONHASHSEED=0` when you launch any experiment:
 ```
