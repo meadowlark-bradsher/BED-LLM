@@ -830,8 +830,12 @@ def _make_plots(
         (result.cumulative_correct_by_turn, result.acquisition) for result in results
     ]
     guesser_short = cfg.model_name.split("/")[-1]
+    # Every acquisition plays the one item list loaded in main, so any result
+    # gives the count the cumulative numbers are out of.
+    total_items = len(results[0].items)
     plot_success_rates(
         data_with_names=datasets_with_names,
+        total_items=total_items,
         plot_title=f"Success Rates for {guesser_short} on {cfg.dataset} Dataset",
         x_label="Turn Number",
         y_label="Success Rate (%)",
