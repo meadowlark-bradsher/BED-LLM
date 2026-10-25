@@ -33,7 +33,6 @@ from q20_turn_setup import (
 from q20_llm_io import Q20LlmInterface, DefaultQ20LlmInterface
 from prompts import task_completion_prompt
 from serve_model import is_reasoning_model
-import os
 import wandb
 from retry_utils import retry_with_backoff
 
@@ -59,7 +58,6 @@ class Q20:
         item,
         task=None,
         enable_maybe=False,
-        history=False,
         react=False,
         log_correct_guess_prob: bool = True,
         guess_evaluator: Optional[GuessEvaluator] = None,
@@ -96,7 +94,6 @@ class Q20:
         self.item = item
         self.task = task
         self.enable_maybe = enable_maybe
-        self.history = history
         self.log_correct_guess_prob = log_correct_guess_prob
         self.guess_evaluator = (
             guess_evaluator
@@ -496,7 +493,6 @@ class Q20:
         user_mode=False,
         num_turns=20,
         print_probs=False,
-        data=None,
         acquisition="EIG",
         sample=False,
         use_logits_entropy=False,
@@ -512,12 +508,9 @@ class Q20:
             "Concepts",
             "Questions",
             "EIG",
-            "EIG on data",
             "Guess",
         ]
         q_table = self._create_table(columns=columns)
-        if data is not None:
-            data = data.copy()
         turn_setup = self._build_eig_turn_setup(
             question_sampler=question_sampler,
             concept_sampler=concept_sampler,
@@ -534,7 +527,6 @@ class Q20:
             # System asking a question
             print(f"Question {t + 1}")
             max_eig = 0
-            question_eig_on_data = 0
             generated_question = None
             turn_setup_data = turn_setup.prepare(
                 turn_index=t,
@@ -585,7 +577,6 @@ class Q20:
                 str(concepts),
                 str(followup_questions),
                 max_eig,
-                question_eig_on_data,
                 guess,
             )
 
@@ -631,7 +622,6 @@ class Q20:
         concept_sampler,
         user_mode=False,
         num_turns=20,
-        data=None,
         sample=False,
         num_questions=10,
         acquisition=None,

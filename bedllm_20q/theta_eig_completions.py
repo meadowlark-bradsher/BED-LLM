@@ -1,6 +1,5 @@
 from transformers import AutoTokenizer
 import numpy as np
-import tiktoken
 from functools import lru_cache
 from serve_model import ModelServer
 from concurrent.futures import ThreadPoolExecutor
@@ -15,7 +14,13 @@ def _tokenizer_for(model_name: str):
     once per candidate question per answer branch on each turn.
     """
     if model_name.startswith("gpt"):
-        return tiktoken.encoding_for_model(model_name)
+        # Hosted OpenAI models never reach this path: every caller routes them
+        # through ``theta_eig.item_probs_from_chat_logprobs`` instead, and the
+        # ``echo`` + ``logprobs`` completions call below is unavailable there.
+        raise ValueError(
+            f"{model_name!r} is a hosted OpenAI model; completion logprobs need "
+            "a locally served model"
+        )
     return AutoTokenizer.from_pretrained(model_name)
 
 

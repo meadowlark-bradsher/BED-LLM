@@ -116,13 +116,6 @@ flags.DEFINE_integer(
     "concept_max_iterations", 2, "max retry iterations for concept generation"
 )
 flags.DEFINE_integer("tokens_per_sample", 15, "max_tokens budget per concept sample")
-flags.DEFINE_float(
-    "consistency_threshold",
-    0.8,
-    "p(no) threshold for filtering inconsistent concepts. Read only by the "
-    "deprecated ConceptSampler.ask_llm; for the live filter see "
-    "--logprob_reject_threshold",
-)
 flags.DEFINE_integer(
     "multi_completion_stage_cutoff",
     19,
@@ -182,18 +175,6 @@ flags.DEFINE_float(
 )
 flags.DEFINE_integer(
     "question_max_attempts", 2, "max outer retry attempts for question generation"
-)
-flags.DEFINE_float(
-    "declarative_temperature", 0.15, "temperature for declarative QA conversion"
-)
-flags.DEFINE_float("declarative_top_p", 0.95, "top-p for declarative QA conversion")
-flags.DEFINE_integer(
-    "declarative_max_tokens", 30, "max tokens for declarative QA conversion"
-)
-flags.DEFINE_float(
-    "declarative_repetition_penalty",
-    1.1,
-    "repetition penalty for declarative QA conversion",
 )
 
 
@@ -259,7 +240,6 @@ class RunConfig:
             stage1_oversample_factor=FLAGS.stage1_oversample_factor,
             max_iterations=FLAGS.concept_max_iterations,
             tokens_per_sample=FLAGS.tokens_per_sample,
-            consistency_threshold=FLAGS.consistency_threshold,
             multi_completion_stage_cutoff=FLAGS.multi_completion_stage_cutoff,
             filter_oversample_factor=FLAGS.filter_oversample_factor,
             chat_retry_max_attempts=FLAGS.chat_retry_max_attempts,
@@ -275,10 +255,6 @@ class RunConfig:
             top_p=FLAGS.question_top_p,
             repetition_penalty=FLAGS.question_repetition_penalty,
             max_attempts=FLAGS.question_max_attempts,
-            declarative_temperature=FLAGS.declarative_temperature,
-            declarative_top_p=FLAGS.declarative_top_p,
-            declarative_max_tokens=FLAGS.declarative_max_tokens,
-            declarative_repetition_penalty=FLAGS.declarative_repetition_penalty,
         )
         return cls(
             model_name=FLAGS.model_name,
@@ -386,13 +362,13 @@ def _shared_kwargs(cfg: RunConfig) -> dict:
     return {"num_turns": cfg.num_turns, "sample": cfg.sample_answer}
 
 
-def _prompt_only_kwargs(_qs, _cs, _items, cfg: RunConfig, _acq: str) -> dict:
+def _prompt_only_kwargs(_qs, _cs, cfg: RunConfig, _acq: str) -> dict:
     # Prompt_Only asks the guesser for the next question directly, so it needs
     # neither a hypothesis sampler nor a candidate-question sampler.
     return {**_shared_kwargs(cfg), "concept_sampler": None}
 
 
-def _llm_chat_kwargs(qs, _cs, _items, cfg: RunConfig, acq: str) -> dict:
+def _llm_chat_kwargs(qs, _cs, cfg: RunConfig, acq: str) -> dict:
     return {
         **_shared_kwargs(cfg),
         "concept_sampler": None,
@@ -402,44 +378,41 @@ def _llm_chat_kwargs(qs, _cs, _items, cfg: RunConfig, acq: str) -> dict:
     }
 
 
-def _theta_eig_kwargs(qs, cs, items, cfg: RunConfig, acq: str) -> dict:
+def _theta_eig_kwargs(qs, cs, cfg: RunConfig, acq: str) -> dict:
     return {
         **_shared_kwargs(cfg),
         "question_sampler": qs,
         "concept_sampler": cs,
-        "data": items,
         "num_questions": cfg.num_questions,
         "acquisition": acq,
     }
 
 
-def _no_filter_kwargs(qs, cs, items, cfg: RunConfig, _acq: str) -> dict:
+def _no_filter_kwargs(qs, cs, cfg: RunConfig, _acq: str) -> dict:
     # No_filter is EIG with filtering off - folded here rather than as its own
     # acquisition name on Q20 to mirror the previous behaviour.
     return {
         **_shared_kwargs(cfg),
         "question_sampler": qs,
         "concept_sampler": cs,
-        "data": items,
         "num_questions": cfg.num_questions,
         "acquisition": "EIG",
         "filter": False,
     }
 
 
-def _eig_logits_only_kwargs(qs, cs, items, cfg: RunConfig, acq: str) -> dict:
+def _eig_logits_only_kwargs(qs, cs, cfg: RunConfig, acq: str) -> dict:
     return {
         **_shared_kwargs(cfg),
         "question_sampler": qs,
         "concept_sampler": cs,
-        "data": items,
         "num_questions": cfg.num_questions,
         "acquisition": acq,
         "use_logits_entropy": cfg.use_logits_entropy,
     }
 
 
-def _eig_full_kwargs(qs, cs, items, cfg: RunConfig, acq: str) -> dict:
+def _eig_full_kwargs(qs, cs, cfg: RunConfig, acq: str) -> dict:
     # `use_history` (the `--history` flag) is forwarded for EIG, Entropy and
     # Implicit_Max but is only consumed by the EIG chooser
     # (`question_eig`); the Entropy and Implicit_Max choosers ignore
@@ -447,7 +420,7 @@ def _eig_full_kwargs(qs, cs, items, cfg: RunConfig, acq: str) -> dict:
     # and sharing this builder is behaviourally equivalent to routing Entropy
     # and Implicit_Max through `_eig_logits_only_kwargs`.
     return {
-        **_eig_logits_only_kwargs(qs, cs, items, cfg, acq),
+        **_eig_logits_only_kwargs(qs, cs, cfg, acq),
         "use_history": cfg.history,
     }
 
@@ -457,9 +430,7 @@ class _Dispatch:
     """The Q20 method to call + a kwargs builder for one acquisition strategy."""
 
     method_name: str
-    build_kwargs: Callable[
-        [QuestionSampler, ConceptSampler, list[str], RunConfig, str], dict
-    ]
+    build_kwargs: Callable[[QuestionSampler, ConceptSampler, RunConfig, str], dict]
 
 
 _DISPATCH: dict[str, _Dispatch] = {
@@ -495,7 +466,6 @@ def _build_dispatch(
     acquisition: str,
     question_sampler: QuestionSampler,
     concept_sampler: ConceptSampler,
-    items: list[str],
     cfg: RunConfig,
 ) -> tuple[str, dict]:
     """Return (Q20-method-name, kwargs) for the given acquisition strategy.
@@ -511,7 +481,7 @@ def _build_dispatch(
             f"Valid: {tuple(_DISPATCH.keys())}"
         ) from None
     return rule.method_name, rule.build_kwargs(
-        question_sampler, concept_sampler, items, cfg, acquisition
+        question_sampler, concept_sampler, cfg, acquisition
     )
 
 
@@ -648,7 +618,7 @@ def _run_acquisition(
             with ThreadPoolExecutor(max_workers=cfg.max_workers) as executor:
                 batch_started_count = len(pending)
                 method_name, dispatch_kwargs = _build_dispatch(
-                    acquisition, qs, cs, items, cfg
+                    acquisition, qs, cs, cfg
                 )
                 agents_by_item = {
                     item: Q20(

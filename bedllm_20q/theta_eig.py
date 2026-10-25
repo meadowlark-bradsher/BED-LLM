@@ -3,10 +3,6 @@ import numpy as np
 from prompts import task_completion_prompt
 from retry_utils import retry_with_backoff
 
-init_prompt = "Generate a random famous person. Just provide the name without any additional information:"
-prompt = "Generate a random famous person. Provide the **full** name without any additional information, including the tokens given. The first tokens have been generated for you: "
-
-thetas = []
 
 
 def chat_with_logprobs(prompt, model, messages=None):

@@ -104,7 +104,6 @@ class NaiveTurnSetup:
                 num_questions=self.num_questions,
                 final=(turn_index == num_turns - 1),
                 concepts=[],
-                declarative_messages=[],
                 dataset=self.agent.task,
                 item=self.agent.item,
                 log_correct_guess_prob=self.agent.log_correct_guess_prob,
@@ -152,7 +151,6 @@ class _ConceptBackboneTurnSetup:
         self.question_sampler = question_sampler
         self.concept_sampler = concept_sampler
         self.filter_value = filter_value
-        self.declarative_messages: List[Any] = []
         self.valid_concepts: Optional[List[str]] = None
         self.last_guess = "N/A"
 
@@ -162,18 +160,15 @@ class _ConceptBackboneTurnSetup:
         for _ in range(3):
             kwargs = {
                 "stage": turn_index + 1,
-                "declarative_messages": self.declarative_messages,
                 "valid_concepts": self.valid_concepts,
                 "task": self.agent.task,
             }
             if self.filter_value is not None:
                 kwargs["filter"] = self.filter_value
 
-            concepts, self.declarative_messages = (
-                self.concept_sampler.generate_diverse_samples_from_chat(
-                    self.agent.guesser_messages,
-                    **kwargs,
-                )
+            concepts = self.concept_sampler.generate_diverse_samples_from_chat(
+                self.agent.guesser_messages,
+                **kwargs,
             )
             self.valid_concepts = list(concepts)
             if turn_index == 0:
@@ -278,7 +273,6 @@ class EigTurnSetup(_ConceptBackboneTurnSetup):
             num_questions=self.num_questions,
             final=(turn_index == num_turns - 1),
             concepts=concepts,
-            declarative_messages=self.declarative_messages,
             dataset=self.agent.task,
             item=self.agent.item,
             log_correct_guess_prob=self.agent.log_correct_guess_prob,

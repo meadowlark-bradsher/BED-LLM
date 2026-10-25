@@ -1,7 +1,6 @@
 import logging
 import re
 import time
-import warnings
 from dataclasses import dataclass
 
 from retry_utils import retry_with_backoff
@@ -56,10 +55,6 @@ _RETRY_MAX_DELAY = 128.0
 # the inner attempts above are exhausted.
 _OUTER_RETRY_DELAY = 1.0
 
-# Cap for the deprecated declarative conversion, which retries until the model
-# returns a non-empty statement.
-_DECLARATIVE_MAX_ATTEMPTS = 10
-
 # Bullet marker that the question prompts ask the model not to emit, and that it
 # emits anyway. Stripped from the front of a line only.
 _BULLET_PREFIX = "- "
@@ -92,10 +87,6 @@ class QuestionSamplerConfig:
     top_p: float = 0.9
     repetition_penalty: float = 1.05
     max_attempts: int = 2
-    declarative_temperature: float = 0.15
-    declarative_top_p: float = 0.95
-    declarative_max_tokens: int = 30
-    declarative_repetition_penalty: float = 1.1
 
 
 class QuestionSampler:
@@ -140,17 +131,12 @@ class QuestionSampler:
         final=False,
         chat=True,
         concepts=None,
-        declarative=False,
-        declarative_messages=None,
         dataset="celebrities",
         item=None,
         return_answer_probs=False,
         log_correct_guess_prob: bool = True,
     ):
         concepts = concepts if concepts is not None else []
-        declarative_messages = (
-            declarative_messages if declarative_messages is not None else []
-        )
         if num_questions is None:
             num_questions = self.config.num_questions
         if num_questions <= 0:
@@ -195,20 +181,6 @@ class QuestionSampler:
             answer_prob = self._correct_guess_logprob(
                 conversation, _split_item_aliases(item)
             )
-
-        if chat and declarative:
-            # Loop-invariant, so built once instead of on every retry.
-            new_messages = [
-                {
-                    "role": "user",
-                    "content": self.create_declarative_prompt_from_declarative(
-                        declarative_messages=declarative_messages,
-                        num_samples=num_questions,
-                        concepts=concepts,
-                        final=final,
-                    ),
-                }
-            ]
 
         questions = []
         outer_attempts = 0
@@ -305,103 +277,6 @@ class QuestionSampler:
             return questions, answer_prob
         return questions
 
-    # Deprecated.
-    def convert_messages_to_declarative(self, messages, reverse=False):
-        warnings.warn(
-            "QuestionSampler.convert_messages_to_declarative is deprecated.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        declarative_messages = []
-        for i in range(1, len(messages) - 1, 2):
-            question = messages[i]["content"].strip()
-            answer = messages[i + 1]["content"].strip()
-            qa_pair = f"Question: {question}, Answer: {answer}"
-            declarative_qa = ""
-
-            for _ in range(_DECLARATIVE_MAX_ATTEMPTS):
-                declarative_qa = self.convert_to_declarative(qa_pair)
-                if declarative_qa:
-                    break
-            else:
-                logger.warning(
-                    "no declarative statement after %s attempts for: %s",
-                    _DECLARATIVE_MAX_ATTEMPTS,
-                    qa_pair,
-                )
-            declarative_messages.append(declarative_qa)
-
-        if reverse:
-            declarative_messages = declarative_messages[::-1]
-
-        return declarative_messages
-
-    # Deprecated.
-    def convert_to_declarative(self, qa_pair):
-        warnings.warn(
-            "QuestionSampler.convert_to_declarative is deprecated.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        prompt = (
-            "Convert the following Q&A pair into a declarative statement.\n\n"
-            "Example:\n"
-            "Question: Is the sun pink or white?, Answer: No.\n"
-            "Statement: The sun is not pink or white.\n\n"
-            "Now, convert this Q&A pair:\n"
-            f"{qa_pair}\n"
-            "Statement:"
-        )
-
-        response = self.model.client.completions.create(
-            model=self.model_name,
-            prompt=prompt,
-            max_tokens=self.config.declarative_max_tokens,
-            temperature=self.config.declarative_temperature,
-            top_p=self.config.declarative_top_p,
-            extra_body={
-                "repetition_penalty": self.config.declarative_repetition_penalty,
-            },
-        )
-
-        text = re.sub(r"<\|END_RESPONSE\|>", "", response.choices[0].text)
-        return text.split(".")[0].lstrip().strip()
-
-    # Deprecated.
-    # ConceptSampler's method of the same name has a different signature.
-    def create_declarative_prompt_from_declarative(
-        self, declarative_messages, num_samples, concepts, final=False
-    ):
-        warnings.warn(
-            "QuestionSampler.create_declarative_prompt_from_declarative is deprecated.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
-        statements = "\n".join(
-            f"{i}. {message}" for i, message in enumerate(declarative_messages, 1)
-        )
-
-        if final:
-            prompt = (
-                f"{statements}\n\n"
-                f"There are {len(declarative_messages)} statements above. Deduce the identity of the famous person who is consistent with all of them. "
-                f"Given the statements, another LLM has generated a possibly incomplete list of possible identities: {concepts} "
-                "Based on the statements above, guess the identity of the person by asking a question which is answerable in a binary fashion ('i.e. is it John Doe?'). "
-                "Just respond with the identity question and nothing else."
-            )
-        else:
-            prompt = (
-                f"{statements}\n\n"
-                f"You are participating in a game of 20 questions to deduce the identity of a famous person (real or fictional). Based on the statements above, generate a list of **up to** {num_samples} diverse, strategic and insightful follow-up questions that will help efficiently narrow down the identity of the person."
-                f"Given the questions and answers asked, another LLM has generated a list of possible identities: {concepts}. It may be good to try to narrow these down."
-                "The questions must be strictly binary - each question can only be answered with 'Yes' or 'No'. Additionally, some of the questions should attempt to guess the identity "
-                "of the item (for example, 'Is it item X?') while still being answerable in a binary fashion. "
-                "Return each question on a separate line with no extra commentary or numbering."
-                "Each question must be consistent with all statements above and should aim to maximize information gain by distinguishing between the remaining possibilities. Avoid redundancy and ensure that the questions cover diverse attributes such as time period, profession, nationality, and notable achievements."
-                "If you are confident about the identity of the person, then just generate one question with your guess given all previous information."
-            )
-        return prompt
 
 
 if __name__ == "__main__":

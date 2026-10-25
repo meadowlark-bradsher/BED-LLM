@@ -2,7 +2,6 @@ import functools
 import logging
 import re
 import threading
-import warnings
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -21,7 +20,6 @@ from utils import (
     format_conversation,
     get_animal_concept_prompt,
     parse_llm_line_list,
-    score_ranked_list,
 )
 
 
@@ -168,7 +166,6 @@ class ConceptSamplerConfig:
     stage1_oversample_factor: int = 3
     max_iterations: int = 2
     tokens_per_sample: int = 15
-    consistency_threshold: float = 0.8
     multi_completion_stage_cutoff: int = 19
     filter_oversample_factor: int = 3
     chat_retry_max_attempts: int = 10
@@ -385,8 +382,6 @@ class ConceptSampler:
         num_samples: int,
         stage: int,
         valid_samples: list[str],
-        declarative: bool,
-        declarative_messages: Optional[list[str]] = None,
     ) -> list[dict]:
         """Assemble the chat-completions ``messages`` payload."""
         strategy = _CONCEPT_PROMPTS[task]
@@ -406,19 +401,6 @@ class ConceptSampler:
         if stage == 1:
             new_messages = new_messages[1:]  # drop the head message
         new_messages.append({"role": "user", "content": content})
-        if declarative:
-            new_messages = [
-                {
-                    "role": "user",
-                    "content": self.create_declarative_prompt_from_declarative(
-                        declarative_messages or [], num_samples, reverse=True
-                    )
-                    if stage > 1
-                    # At stage 1 this is the same initial prompt ``content``
-                    # already holds, so it is reused rather than recomputed.
-                    else content,
-                }
-            ]
         return new_messages
 
     def _parse_concepts(self, output: str) -> list[str]:
@@ -488,16 +470,12 @@ class ConceptSampler:
         num_samples=None,
         stage=None,
         chat=True,
-        declarative=False,
-        declarative_messages=None,
         valid_concepts=None,
         task="celebrities",
         filter=True,
     ):
         if num_samples is None:
             num_samples = self.config.num_samples
-        if declarative_messages is None:
-            declarative_messages = []
         if valid_concepts is None:
             valid_concepts = []
         if stage is None:
@@ -521,8 +499,6 @@ class ConceptSampler:
             num_samples=effective_num_samples,
             stage=stage,
             valid_samples=valid_samples,
-            declarative=declarative,
-            declarative_messages=declarative_messages,
         )
 
         samples: list[str] = []
@@ -532,7 +508,7 @@ class ConceptSampler:
             iteration += 1
             # ``samples_before`` is only populated by the stage > 1 filter,
             # so the guard keeps the retry prompt to non-empty example lists.
-            if iteration > 1 and not declarative and samples_before:
+            if iteration > 1 and samples_before:
                 new_messages[-1]["content"] = (
                     new_messages[-1]["content"]
                     + "\n"
@@ -568,150 +544,7 @@ class ConceptSampler:
         if len(samples) < num_samples:
             logger.warning("only %d samples were generated", len(samples))
 
-        return samples, declarative_messages
-
-    # Deprecated.
-    def ask_llm(self, message, concept) -> bool:
-        warnings.warn(
-            "ConceptSampler.ask_llm is deprecated and slated for removal.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        user_messages = [
-            {
-                "role": "system",
-                "content": f"Based on your knowledge about {concept}, "
-                f"conclude whether it is consistent with this statement: {message}. "
-                f"Limit your respond to only 'Yes.', or 'No.', with no explanation or other words. "
-                f"Never say the answer {concept} in your response. ",
-            },
-            {
-                "role": "user",
-                "content": f"Does the person {concept} fit with the following statement?\n{message}\n"
-                "Answer from (Yes/No)",
-            },
-        ]
-
-        prompt = format_conversation(user_messages)
-
-        prompt += "\nASSISTANT:<|START_RESPONSE|>"
-
-        response = self.model.client.completions.create(
-            model=self.model_name,
-            prompt=prompt,
-            max_tokens=_YES_NO_MAX_TOKENS,
-            logprobs=_YES_NO_TOP_LOGPROBS,
-        )
-        logprobs = response.choices[0].logprobs.top_logprobs[0]
-        p_no = 0.0
-        if "No" in logprobs:
-            p_no = np.exp(logprobs["No"])
-        # This method applies an absolute threshold to p(no). See
-        # ``check_single_answer`` for the form that compares p(no) to p(yes).
-        if p_no > self.config.consistency_threshold:
-            return False
-
-        return True
-
-    # Deprecated.
-    def convert_messages_to_declarative(self, messages, reverse=False):
-        warnings.warn(
-            "ConceptSampler.convert_messages_to_declarative is deprecated.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        declarative_messages = []
-        for question, answer in _qa_pairs(messages):
-            qa_pair = f"Question: {question}, Answer: {answer}"
-            declarative_qa = ""
-            while declarative_qa == "":
-                declarative_qa = self.convert_to_declarative(qa_pair)
-            declarative_messages.append(declarative_qa)
-
-        if reverse:
-            declarative_messages = declarative_messages[::-1]
-        logger.info("declarative messages count: %d", len(declarative_messages))
-        return declarative_messages
-
-    # Deprecated.
-    def check_samples_declarative(self, declarative_messages, concepts) -> list:
-        warnings.warn(
-            "ConceptSampler.check_samples_declarative is deprecated.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        for message in declarative_messages:
-            with ThreadPoolExecutor() as executor:
-                futures = [
-                    executor.submit(self.ask_llm, message, concept)
-                    for concept in concepts
-                ]
-                results = [future.result() for future in futures]
-                concepts = [
-                    concept for concept, valid in zip(concepts, results) if valid
-                ]
-
-            if not concepts:
-                break
-
-        return concepts
-
-    # Deprecated.
-    def convert_to_declarative(self, qa_pair):
-        warnings.warn(
-            "ConceptSampler.convert_to_declarative is deprecated.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        prompt = (
-            "Convert the following Q&A pair into a declarative statement.\n\n"
-            "Example:\n"
-            "Question: Is the sun pink or white?, Answer: No.\n"
-            "Statement: The sun is not pink or white.\n\n"
-            "Now, convert this Q&A pair:\n"
-            f"{qa_pair}\n"
-            "Statement:<|START_RESPONSE|>"
-        )
-
-        response = self.model.client.completions.create(
-            model=self.model_name,
-            prompt=prompt,
-            max_tokens=30,
-            temperature=0.15,
-            top_p=0.95,
-            extra_body={
-                "repetition_penalty": 1.1,
-            },
-        )
-        response = response.choices[0].text
-        response = re.sub(r"<\|END_RESPONSE\|>", "", response)
-        return response.split(".")[0].lstrip().strip()
-
-    # Deprecated.
-    def create_declarative_prompt_from_declarative(
-        self, declarative_messages, num_samples, reverse=False
-    ):
-        warnings.warn(
-            "ConceptSampler.create_declarative_prompt_from_declarative is deprecated.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if reverse:
-            declarative_messages = declarative_messages[::-1]
-        statements = "\n".join(
-            f"{i}. {message}" for i, message in enumerate(declarative_messages, 1)
-        )
-
-        prompt = (
-            "You are participating in a game of 20 questions."
-            f"Based on the information provided in the statements below, generate a list of **up to** {num_samples} diverse, unique examples of historical or current famous figures (real or fictional). Each person must be consistent with *all* the established clues from the conversation. "
-            "Statements:\n"
-            f"{statements}\n\n"
-            "Each example should be on a separate line and be a single distinct entity with nothing else added (e.g., 'George Washington', 'Blaise Pascal', 'James Brown'), and no repetition. "
-            "Ensure diversity in terms of time periods, geographic locations, and areas of achievement, while strictly adhering to the constraints set by the previous questions and answers. Some of the examples should be more obscure."
-        )
-
-        return prompt
+        return samples
 
     def reverse_pairs(self, messages):
         head = messages[0]
@@ -1009,35 +842,6 @@ class ConceptSampler:
                     break
         return concepts
 
-    # Deprecated.
-    def rank_concepts(self, concepts, messages, item):
-        warnings.warn(
-            "ConceptSampler.rank_concepts is deprecated.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        user_messages = [
-            {
-                "role": "user",
-                "content": f"I have the following list of possible answers:\n{concepts}\n. Please rank the top 10 possible answers in order of likelihood, with the most likely answer first. "
-                "Please provide the ranking in a numbered list format, with each answer on a separate line. Preserve the original text of each answer."
-                "Please do not provide any explanations or additional information, just the ranking.",
-            },
-        ]
-
-        new_messages = messages.copy()
-        new_messages.append(user_messages[0])
-
-        response = self.model.client.chat.completions.create(
-            model=self.model_name,
-            messages=new_messages,
-            temperature=0.7,
-            n=1,
-        )
-        logger.info("ranking: %s", response.choices[0].message.content)
-        output = response.choices[0].message.content
-        rank = score_ranked_list(output, item)
-        return rank
 
 
 if __name__ == "__main__":
@@ -1057,7 +861,7 @@ if __name__ == "__main__":
         {"role": "user", "content": "No."},
     ]
 
-    samples, declarative_messages = concept_sampler.generate_diverse_samples_from_chat(
+    samples = concept_sampler.generate_diverse_samples_from_chat(
         chat_messages, num_samples=25, stage=3, task="animals"
     )
 

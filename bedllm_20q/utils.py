@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 import wandb
 import re
 
-from prompts import PROMPT, task_completion_prompt  # noqa: F401
+from prompts import task_completion_prompt
 from theta_eig import item_probs_from_chat_logprobs
 from theta_eig_completions import (
     item_probs_from_completion_logprobs,
@@ -426,7 +426,7 @@ def question_theta_eig_union_mixture(
                     branch_accumulator[concept] += probs[i]
 
             # Sample concepts for 'Yes' response
-            yes_concepts, _ = concept_sampler.generate_diverse_samples_from_chat(
+            yes_concepts = concept_sampler.generate_diverse_samples_from_chat(
                 agent_messages,
                 stage=step,
                 valid_concepts=concepts.copy(),
@@ -437,7 +437,7 @@ def question_theta_eig_union_mixture(
             agent_messages_cropped[-1] = {"role": "user", "content": "No."}
             agent_messages[-1] = {"role": "user", "content": "No."}
 
-            no_concepts, _ = concept_sampler.generate_diverse_samples_from_chat(
+            no_concepts = concept_sampler.generate_diverse_samples_from_chat(
                 agent_messages,
                 stage=step,
                 valid_concepts=concepts.copy(),
@@ -572,7 +572,7 @@ def question_theta_eig_rank_aligned(
             agent_messages_cropped_yes = agent_messages_cropped.copy()
 
             # Sample concepts for 'Yes' response
-            yes_concepts, _ = concept_sampler.generate_diverse_samples_from_chat(
+            yes_concepts = concept_sampler.generate_diverse_samples_from_chat(
                 agent_messages,
                 stage=step,
                 valid_concepts=concepts.copy(),
@@ -596,7 +596,7 @@ def question_theta_eig_rank_aligned(
             agent_messages_cropped[-1] = {"role": "user", "content": "No."}
             agent_messages[-1] = {"role": "user", "content": "No."}
 
-            no_concepts, _ = concept_sampler.generate_diverse_samples_from_chat(
+            no_concepts = concept_sampler.generate_diverse_samples_from_chat(
                 agent_messages,
                 stage=step,
                 valid_concepts=concepts.copy(),
@@ -768,24 +768,6 @@ def text_mentions_item(item, question):
         re.search(rf"(?:^|\W){re.escape(i.strip().lower())}(?:$|\W)", question.lower())
         for i in item.lower().split("|")
     )
-
-
-def score_ranked_list(list_text: str, target: str, total_items: int = 10) -> int:
-    """Score a target against a numbered list: 0 if missing, else total_items..1."""
-    lines = list_text.splitlines()
-
-    parsed = []
-    pattern = re.compile(r"^(\d+)\.\s*(.*)$")
-    for line in lines:
-        m = pattern.match(line)
-        if m:
-            parsed.append((int(m.group(1)), m.group(2)))
-
-    for idx, (_rank, text) in enumerate(parsed):
-        if text_mentions_item(target, text):
-            return total_items - idx
-
-    return 0
 
 
 def parse_llm_line_list(text, *, boundary_prefixes, clean_line):

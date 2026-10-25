@@ -6,7 +6,8 @@ from typing import Any, Callable, Dict, List, Optional, Protocol
 import numpy as np
 
 from theta_eig_completions import item_probs_from_completion_logprobs
-from utils import PROMPT, format_conversation
+from prompts import PROMPT
+from utils import format_conversation
 
 
 # Floor applied to a yes/no token that the backend did not report. Kept as the
