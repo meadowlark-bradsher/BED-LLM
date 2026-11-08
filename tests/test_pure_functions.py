@@ -22,7 +22,9 @@ from utils import (
     extract_action_content,
     format_conversation,
     parse_llm_line_list,
+    question_eig,
     text_mentions_item,
+    weighted_binary_eig,
 )
 
 
@@ -98,6 +100,82 @@ def test_eig_identity_rewards_a_question_that_splits_the_concepts():
     probs_yes = [p_yes for p_yes, _ in results]
     eig = ensemble_binary_entropy(probs_yes) - average_binary_entropy(results)
     assert eig == pytest.approx(1.0)
+
+
+# ---- model-free weighted EIG ---------------------------------------------
+
+
+def test_weighted_binary_eig_uniform_matches_the_question_eig_identity():
+    probs_yes = [0.9, 0.2, 0.5, 0.7, 0.05]
+    pairs = [(p, 1 - p) for p in probs_yes]
+    expected = ensemble_binary_entropy(probs_yes) - average_binary_entropy(pairs)
+    assert weighted_binary_eig(probs_yes) == pytest.approx(expected)
+    assert weighted_binary_eig(probs_yes, [1, 1, 1, 1, 1]) == pytest.approx(expected)
+
+
+def test_weighted_binary_eig_certain_answers_match_the_analytic_split():
+    # Five hypotheses, two of which answer yes: the uniform-prior formula
+    # log2|B| - (y/|B|) log2 y - (n/|B|) log2 n.
+    b, y, n = 5, 2, 3
+    analytic = math.log2(b) - (y / b) * math.log2(y) - (n / b) * math.log2(n)
+    assert weighted_binary_eig([1.0, 1.0, 0.0, 0.0, 0.0]) == pytest.approx(analytic)
+    # A question nobody splits on carries no information.
+    assert weighted_binary_eig([1.0, 1.0, 1.0]) == 0.0
+    assert weighted_binary_eig([0.0, 0.0]) == 0.0
+
+
+def test_weighted_binary_eig_weights_equal_repeated_hypotheses():
+    probs_yes = [1.0, 0.0, 0.3]
+    counts = [2, 1, 3]
+    repeated = [p for p, k in zip(probs_yes, counts) for _ in range(k)]
+    weighted = weighted_binary_eig(probs_yes, counts)
+    assert weighted == pytest.approx(weighted_binary_eig(repeated))
+    # Weights are normalised, so only their ratios matter.
+    assert weighted_binary_eig(probs_yes, [0.2, 0.1, 0.3]) == pytest.approx(weighted)
+    # And a non-uniform prior gives a different number from the uniform one.
+    assert weighted != pytest.approx(weighted_binary_eig(probs_yes))
+
+
+def test_weighted_binary_eig_ignores_a_zero_weight_hypothesis():
+    assert weighted_binary_eig([1.0, 0.0, 0.5], [1, 1, 0]) == pytest.approx(1.0)
+
+
+def test_weighted_binary_eig_is_bounded_and_empty_is_zero():
+    assert weighted_binary_eig([]) == 0.0
+    assert weighted_binary_eig([], []) == 0.0
+    eig = weighted_binary_eig([0.1, 0.9, 0.5, 0.0, 1.0], [1, 2, 3, 4, 5])
+    assert 0.0 <= eig <= 1.0
+
+
+def test_weighted_binary_eig_rejects_bad_weights():
+    with pytest.raises(ValueError):
+        weighted_binary_eig([0.5, 0.5], [1.0])
+    with pytest.raises(ValueError):
+        weighted_binary_eig([0.5, 0.5], [1.0, -1.0])
+    with pytest.raises(ValueError):
+        weighted_binary_eig([0.5, 0.5], [0.0, 0.0])
+
+
+def test_question_eig_scores_agree_with_weighted_binary_eig():
+    """``question_eig`` needs only ``agent.yes_no_probs``; fed from a table it
+    picks the question ``weighted_binary_eig`` ranks highest, with the same
+    score, so the two stay one quantity."""
+    concepts = ["a", "b", "c", "d"]
+    table = {
+        "splits evenly": [1.0, 1.0, 0.0, 0.0],
+        "splits unevenly": [1.0, 0.0, 0.0, 0.0],
+        "uncertain": [0.6, 0.4, 0.5, 0.5],
+    }
+    agent = NS(
+        yes_no_probs=lambda question, concept, use_history=False: (
+            table[question][concepts.index(concept)],
+            1 - table[question][concepts.index(concept)],
+        )
+    )
+    question, score = question_eig(concepts, list(table), agent)
+    expected = {q: weighted_binary_eig(p) for q, p in table.items()}
+    assert question == max(expected, key=expected.get) == "splits evenly"
+    assert score == pytest.approx(expected[question]) == pytest.approx(1.0)
 
 
 # ---- text matching and parsing --------------------------------------------
