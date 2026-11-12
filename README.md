@@ -98,6 +98,16 @@ Four limits to know:
 The option is off by default, so a run without it reproduces the recorded
 results.
 
+## Scoring a question from supplied probabilities
+
+`utils.weighted_binary_eig(probs_yes, weights=None)` returns the EIG in bits of
+one yes/no question from a list of p(yes | question, hypothesis) values and
+optional hypothesis weights, with no model call. With uniform weights it is the
+number `question_eig` computes after asking the model for every (question,
+hypothesis) pair. `question_eig` itself has no weights, so a non-uniform prior
+there means repeating a hypothesis in the concept list; the weighted function
+agrees with that repetition exactly.
+
 ## Tests
 ```
 pip install -r requirements-test.txt

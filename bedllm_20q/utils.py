@@ -685,6 +685,59 @@ def average_binary_entropy(probs):
     return sum(entropies) / len(entropies)
 
 
+def weighted_binary_eig(probs_yes, weights=None):
+    """Return the EIG (bits) of one yes/no question from supplied answer probabilities.
+
+    ``probs_yes[i]`` is p(yes | question, hypothesis_i) and ``weights[i]`` is
+    the prior weight of hypothesis_i. The weights are normalised here, so raw
+    counts are fine, and ``None`` means a uniform prior. Takes no model: a
+    caller holding a table of answer probabilities (an oracle matrix, a cached
+    run) scores a question without a request.
+
+    Under a uniform prior this is the number ``question_eig`` computes once the
+    model has answered every (question, hypothesis) pair, namely
+    ``ensemble_binary_entropy(probs_yes) - average_binary_entropy(pairs)`` with
+    ``pairs[i] == (probs_yes[i], 1 - probs_yes[i])``, which is what
+    ``extract_yes_no_probs`` returns. ``question_eig`` has no weights of its
+    own, so a non-uniform prior there means repeating a hypothesis in the
+    concept list; this function agrees with that repetition exactly.
+
+    Both entropy terms go through ``_safe_entropy_term``, so a hypothesis whose
+    answer is certain contributes zero conditional entropy and the result lies
+    in ``[0, 1]``. An empty list returns 0.0. Raises ``ValueError`` when the two
+    lists differ in length, a weight is negative, or the weights sum to zero.
+    """
+    probs_yes = [float(p) for p in probs_yes]
+    if weights is None:
+        weights = [1.0] * len(probs_yes)
+    else:
+        weights = [float(w) for w in weights]
+        if len(weights) != len(probs_yes):
+            raise ValueError(
+                f"weighted_binary_eig got {len(probs_yes)} probabilities and "
+                f"{len(weights)} weights"
+            )
+    if len(probs_yes) == 0:
+        return 0.0
+    if any(w < 0 for w in weights):
+        raise ValueError("weighted_binary_eig weights must be non-negative")
+    total = sum(weights)
+    if not total > 0:
+        raise ValueError("weighted_binary_eig weights must not sum to zero")
+    weights = [w / total for w in weights]
+
+    p_yes_avg = sum(w * p for w, p in zip(weights, probs_yes))
+    p_yes_avg = min(max(p_yes_avg, 0.0), 1.0)
+    ensemble_entropy = _safe_entropy_term(p_yes_avg) + _safe_entropy_term(
+        1.0 - p_yes_avg
+    )
+    conditional_entropy = sum(
+        w * (_safe_entropy_term(p) + _safe_entropy_term(1.0 - p))
+        for w, p in zip(weights, probs_yes)
+    )
+    return ensemble_entropy - conditional_entropy
+
+
 def get_animal_concept_prompt(num_samples, init=False):
     prompt_init = (
         f"Generate a list of {num_samples} diverse, unique, representative examples of animals. Some of these examples should be more obscure. "
